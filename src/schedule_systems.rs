@@ -6,8 +6,8 @@
 //! (save, load, advance) to the corresponding bevy_ggrs schedules.
 
 use crate::{
-    AdvanceWorld, Checksum, ConfirmedFrameCount, FixedTimestepData, LoadWorld, LocalInputs,
-    LocalPlayers, MaxPredictionWindow, PlayerInputs, ReadInputs, RollbackFrameCount,
+    AdvanceWorld, Checksum, ConfirmedFrameCount, FixedTimestepData, GgrsFrameTiming, LoadWorld,
+    LocalInputs, LocalPlayers, MaxPredictionWindow, PlayerInputs, ReadInputs, RollbackFrameCount,
     RollbackFrameRate, SaveWorld, Session, SyncTestMismatch,
 };
 use bevy::prelude::*;
@@ -79,6 +79,7 @@ pub(crate) fn run_ggrs_schedules<T: Config>(world: &mut World) {
         }
     }
 
+    world.insert_resource(GgrsFrameTiming::new(fps_delta, time_data.accumulator));
     world.insert_resource(time_data);
 }
 
