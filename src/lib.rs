@@ -30,8 +30,8 @@ pub(crate) mod time;
 /// Convenient re-exports of the most commonly used types. Glob-import this to get started.
 pub mod prelude {
     pub use crate::{
-        GgrsConfig, GgrsPlugin, GgrsSchedule, GgrsTime, PlayerInputs, ReadInputs, Rollback,
-        RollbackApp, RollbackFrameRate, RollbackId, Session, SyncTestMismatch,
+        GgrsConfig, GgrsFrameTiming, GgrsPlugin, GgrsSchedule, GgrsTime, PlayerInputs, ReadInputs,
+        Rollback, RollbackApp, RollbackFrameRate, RollbackId, Session, SyncTestMismatch,
         snapshot::prelude::*,
     };
     pub use ggrs::{GgrsEvent, PlayerType, SessionBuilder};
@@ -232,6 +232,7 @@ impl<C: Config> Plugin for GgrsPlugin<C> {
             .init_resource::<MaxPredictionWindow>()
             .init_resource::<LocalPlayers>()
             .init_resource::<FixedTimestepData>()
+            .init_resource::<GgrsFrameTiming>()
             .init_schedule(ReadInputs)
             .edit_schedule(AdvanceWorld, |schedule| {
                 // AdvanceWorld is mostly a facilitator for GgrsSchedule, so single threading avoids overhead

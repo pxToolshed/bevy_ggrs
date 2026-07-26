@@ -1,7 +1,7 @@
 #[allow(dead_code)]
 mod common;
 
-use bevy::prelude::*;
+use bevy::{prelude::*, time::TimeUpdateStrategy};
 use bevy_ggrs::{RollbackFrameCount, prelude::*};
 use common::{GgrsConfig, base_synctest_app, synctest_session};
 use core::time::Duration;
@@ -46,4 +46,48 @@ fn ggrs_time_survives_session_restart() {
         expected,
         "GgrsTime should track the restarted session's frame count"
     );
+}
+
+#[test]
+fn ggrs_frame_timing_tracks_driver_accumulator() {
+    let mut app = base_synctest_app(2);
+    app.insert_resource(RollbackFrameRate(50));
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+        10,
+    )));
+
+    // The resource exists before the driver has produced a timing sample.
+    let timing = app.world().resource::<GgrsFrameTiming>();
+    assert_eq!(timing.timestep(), Duration::ZERO);
+    assert_eq!(timing.overstep(), Duration::ZERO);
+    assert_eq!(timing.overstep_fraction(), 0.0);
+
+    // Bevy's first update initializes Time without advancing it.
+    app.update();
+    let timing = app.world().resource::<GgrsFrameTiming>();
+    assert_eq!(timing.timestep(), Duration::from_millis(20));
+    assert_eq!(
+        timing.overstep(),
+        Duration::ZERO,
+        "the initial zero delta should leave the accumulator empty"
+    );
+    assert_eq!(timing.overstep_fraction(), 0.0);
+
+    // Ten milliseconds is half of the 50 Hz rollback timestep.
+    app.update();
+    let timing = app.world().resource::<GgrsFrameTiming>();
+    assert_eq!(timing.timestep(), Duration::from_millis(20));
+    assert_eq!(timing.overstep(), Duration::from_millis(10));
+    assert_eq!(timing.overstep_fraction(), 0.5);
+
+    // The next ten milliseconds advances one rollback frame.
+    app.update();
+    let timing = app.world().resource::<GgrsFrameTiming>();
+    assert_eq!(timing.timestep(), Duration::from_millis(20));
+    assert_eq!(
+        timing.overstep(),
+        Duration::ZERO,
+        "a complete rollback timestep should drain the accumulator"
+    );
+    assert_eq!(timing.overstep_fraction(), 0.0);
 }

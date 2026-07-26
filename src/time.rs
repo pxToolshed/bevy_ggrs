@@ -25,6 +25,43 @@ impl Default for RollbackFrameRate {
     }
 }
 
+/// Presentation timing from the most recent GGRS driver pass.
+///
+/// Updated after the driver runs and not rolled back. Use it for interpolation,
+/// not deterministic game logic. Values are zero before the first driver pass.
+#[derive(Resource, Clone, Copy, Debug, Default)]
+pub struct GgrsFrameTiming {
+    timestep: Duration,
+    overstep: Duration,
+}
+
+impl GgrsFrameTiming {
+    pub(crate) fn new(timestep: Duration, overstep: Duration) -> Self {
+        Self { timestep, overstep }
+    }
+
+    /// Timestep used by the most recent GGRS driver pass.
+    pub fn timestep(&self) -> Duration {
+        self.timestep
+    }
+
+    /// Accumulator remaining after the most recent driver pass.
+    pub fn overstep(&self) -> Duration {
+        self.overstep
+    }
+
+    /// Accumulator as a fraction of the timestep in the range `[0, 1)`.
+    ///
+    /// Zero before the first driver pass.
+    pub fn overstep_fraction(&self) -> f32 {
+        if self.timestep.is_zero() {
+            0.0
+        } else {
+            self.overstep.as_secs_f32() / self.timestep.as_secs_f32()
+        }
+    }
+}
+
 /// A [`Time`] type for use with GGRS. This time is guaranteed to be in-sync with
 /// all peers, and reflect that exactly [`RollbackFrameCount`] frames have passed at
 /// the [`RollbackFrameRate`] rate. Note that in the [`GgrsSchedule`](`crate::GgrsSchedule`),
