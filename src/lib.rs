@@ -16,7 +16,10 @@ use bevy::{
 };
 use core::time::Duration;
 pub use ggrs;
-use ggrs::{Config, InputStatus, P2PSession, PlayerHandle, SpectatorSession, SyncTestSession};
+use ggrs::{
+    Config, ExternalSession, Frame, InputStatus, P2PSession, PlayerHandle, SpectatorSession,
+    SyncTestSession,
+};
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, hash::Hash, marker::PhantomData, net::SocketAddr};
 
@@ -30,8 +33,8 @@ pub(crate) mod time;
 /// Convenient re-exports of the most commonly used types. Glob-import this to get started.
 pub mod prelude {
     pub use crate::{
-        GgrsConfig, GgrsPlugin, GgrsSchedule, GgrsTime, PlayerInputs, ReadInputs, Rollback,
-        RollbackApp, RollbackFrameRate, RollbackId, Session, SyncTestMismatch,
+        ExternalInputs, GgrsConfig, GgrsPlugin, GgrsSchedule, GgrsTime, PlayerInputs, ReadInputs,
+        Rollback, RollbackApp, RollbackFrameRate, RollbackId, Session, SyncTestMismatch,
         snapshot::prelude::*,
     };
     pub use ggrs::{GgrsEvent, PlayerType, SessionBuilder};
@@ -85,6 +88,32 @@ pub enum Session<T: Config> {
     P2P(P2PSession<T>),
     /// A spectator session that follows a P2P game without participating in input.
     Spectator(SpectatorSession<T>),
+    /// A transport-free session driven by externally supplied inputs.
+    External(ExternalSession<T>),
+}
+
+/// One frame of ordered inputs for an [`ExternalSession`].
+#[derive(Resource)]
+pub struct ExternalInputs<T: Config> {
+    frame: Frame,
+    inputs: Vec<Option<T::Input>>,
+}
+
+impl<T: Config> ExternalInputs<T> {
+    /// Creates inputs for one explicit GGRS frame.
+    pub fn new(frame: Frame, inputs: Vec<Option<T::Input>>) -> Self {
+        Self { frame, inputs }
+    }
+
+    /// Returns the frame these inputs belong to.
+    pub fn frame(&self) -> Frame {
+        self.frame
+    }
+
+    /// Returns the ordered inputs.
+    pub fn inputs(&self) -> &[Option<T::Input>] {
+        &self.inputs
+    }
 }
 
 /// A resource holding the inputs for all players in the current GGRS frame.

@@ -6,8 +6,8 @@
 //! (save, load, advance) to the corresponding bevy_ggrs schedules.
 
 use crate::{
-    AdvanceWorld, Checksum, ConfirmedFrameCount, FixedTimestepData, LoadWorld, LocalInputs,
-    LocalPlayers, MaxPredictionWindow, PlayerInputs, ReadInputs, RollbackFrameCount,
+    AdvanceWorld, Checksum, ConfirmedFrameCount, ExternalInputs, FixedTimestepData, LoadWorld,
+    LocalInputs, LocalPlayers, MaxPredictionWindow, PlayerInputs, ReadInputs, RollbackFrameCount,
     RollbackFrameRate, SaveWorld, Session, SyncTestMismatch,
 };
 use bevy::prelude::*;
@@ -49,6 +49,50 @@ pub(crate) fn run_ggrs_schedules<T: Config>(world: &mut World) {
             }
             _ => {}
         }
+    }
+
+    if matches!(
+        world.get_resource::<Session<T>>(),
+        Some(Session::External(_))
+    ) {
+        world.insert_resource(LocalPlayers::default());
+        if time_data.accumulator >= fps_delta {
+            let current_frame = match world.get_resource::<Session<T>>() {
+                Some(Session::External(session)) => session.current_frame(),
+                _ => unreachable!(),
+            };
+            let Some(input_frame) = world.get_resource::<ExternalInputs<T>>() else {
+                world.insert_resource(time_data);
+                return;
+            };
+            if input_frame.frame != current_frame {
+                warn!(
+                    "External inputs target frame {}, but the session is at frame {}.",
+                    input_frame.frame, current_frame
+                );
+                world.insert_resource(time_data);
+                return;
+            }
+
+            let inputs = world
+                .remove_resource::<ExternalInputs<T>>()
+                .expect("ExternalInputs disappeared while advancing an ExternalSession");
+            let session = world.remove_resource::<Session<T>>();
+            let Some(Session::External(mut session)) = session else {
+                unreachable!();
+            };
+            let requests = session.advance_frame(&inputs.inputs);
+            world.insert_resource(Session::External(session));
+            match requests {
+                Ok(requests) => {
+                    time_data.accumulator = time_data.accumulator.saturating_sub(fps_delta);
+                    handle_requests(requests, world);
+                }
+                Err(e) => warn!("{e}"),
+            }
+        }
+        world.insert_resource(time_data);
+        return;
     }
 
     // if we accumulated enough time, do steps
@@ -198,6 +242,7 @@ pub(crate) fn handle_requests<T: Config>(requests: Vec<GgrsRequest<T>>, world: &
             Some(Session::P2P(s)) => Some(s.max_prediction()),
             Some(Session::SyncTest(s)) => Some(s.max_prediction()),
             Some(Session::Spectator(_)) => Some(0),
+            Some(Session::External(s)) => Some(s.rollback_history_frames() + 1),
             None => None,
         };
 
@@ -208,6 +253,7 @@ pub(crate) fn handle_requests<T: Config>(requests: Vec<GgrsRequest<T>>, world: &
                 (current_frame >= 0).then_some(current_frame)
             }
             Some(Session::Spectator(_)) => Some(current_frame),
+            Some(Session::External(_)) => Some(-1),
             None => None,
         };
 

@@ -308,6 +308,7 @@ pub fn spawn_players(mut commands: Commands, session: Res<Session<TestConfig>>) 
         Session::SyncTest(s) => s.num_players(),
         Session::P2P(s) => s.num_players(),
         Session::Spectator(s) => s.num_players(),
+        Session::External(s) => s.num_players(),
     };
 
     for handle in 0..num_players {

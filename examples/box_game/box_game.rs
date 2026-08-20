@@ -96,6 +96,7 @@ pub fn setup_system(
         Session::SyncTest(s) => s.num_players(),
         Session::P2P(s) => s.num_players(),
         Session::Spectator(s) => s.num_players(),
+        Session::External(s) => s.num_players(),
     };
 
     // A ground plane
