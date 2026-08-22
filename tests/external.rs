@@ -163,6 +163,60 @@ fn external_session_advances_once_for_accumulated_time() {
     assert!(app.world().resource::<LocalPlayers>().0.is_empty());
 }
 
+#[test]
+fn multi_frame_catchup() {
+    let mut app = app(external_session(1, 3));
+    app.world_mut()
+        .insert_resource(ExternalInputs::<GgrsConfig>::with_more_frames(
+            0,
+            vec![Some(1)],
+            vec![vec![Some(2)], vec![Some(3)]],
+        ));
+    app.world_mut()
+        .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
+            3.0 / 60.0,
+        )));
+    app.update();
+    app.update();
+    assert_eq!(app.world().resource::<RollbackFrameCount>().0, 3);
+}
+
+#[test]
+fn accumulator_limits_batch() {
+    let mut app = app(external_session(1, 3));
+    app.world_mut()
+        .insert_resource(ExternalInputs::<GgrsConfig>::with_more_frames(
+            0,
+            vec![Some(1)],
+            vec![vec![Some(2)], vec![Some(3)]],
+        ));
+    app.update();
+    app.update();
+    assert_eq!(app.world().resource::<RollbackFrameCount>().0, 1);
+}
+
+#[test]
+fn mid_batch_mismatch_aborts() {
+    let mut app = app(external_session(1, 3));
+    app.world_mut()
+        .insert_resource(ExternalInputs::<GgrsConfig>::with_more_frames(
+            1,
+            vec![Some(1)],
+            vec![vec![Some(3)], vec![Some(4)]],
+        ));
+    app.world_mut()
+        .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
+            3.0 / 60.0,
+        )));
+    app.update();
+    app.update();
+    assert_eq!(app.world().resource::<RollbackFrameCount>().0, 0);
+    assert_eq!(
+        app.world().resource::<ExternalInputs<GgrsConfig>>().frame(),
+        1
+    );
+}
+
 #[derive(
     Debug, Copy, Clone, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
 )]

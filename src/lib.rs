@@ -97,12 +97,30 @@ pub enum Session<T: Config> {
 pub struct ExternalInputs<T: Config> {
     frame: Frame,
     inputs: Vec<Option<T::Input>>,
+    more_frames: Vec<Vec<Option<T::Input>>>,
 }
 
 impl<T: Config> ExternalInputs<T> {
     /// Creates inputs for one explicit GGRS frame.
     pub fn new(frame: Frame, inputs: Vec<Option<T::Input>>) -> Self {
-        Self { frame, inputs }
+        Self {
+            frame,
+            inputs,
+            more_frames: Vec::new(),
+        }
+    }
+
+    /// Creates inputs for consecutive GGRS frames.
+    pub fn with_more_frames(
+        frame: Frame,
+        inputs: Vec<Option<T::Input>>,
+        more_frames: Vec<Vec<Option<T::Input>>>,
+    ) -> Self {
+        Self {
+            frame,
+            inputs,
+            more_frames,
+        }
     }
 
     /// Returns the frame these inputs belong to.
@@ -113,6 +131,16 @@ impl<T: Config> ExternalInputs<T> {
     /// Returns the ordered inputs.
     pub fn inputs(&self) -> &[Option<T::Input>] {
         &self.inputs
+    }
+
+    /// Consumes the batch and yields each frame with its ordered inputs.
+    pub fn into_iter(self) -> impl Iterator<Item = (Frame, Vec<Option<T::Input>>)> {
+        std::iter::once((self.frame, self.inputs)).chain(
+            self.more_frames
+                .into_iter()
+                .enumerate()
+                .map(move |(offset, inputs)| (self.frame + offset as Frame + 1, inputs)),
+        )
     }
 }
 

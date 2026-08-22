@@ -57,38 +57,55 @@ pub(crate) fn run_ggrs_schedules<T: Config>(world: &mut World) {
     ) {
         world.insert_resource(LocalPlayers::default());
         if time_data.accumulator >= fps_delta {
-            let current_frame = match world.get_resource::<Session<T>>() {
-                Some(Session::External(session)) => session.current_frame(),
-                _ => unreachable!(),
-            };
-            let Some(input_frame) = world.get_resource::<ExternalInputs<T>>() else {
+            let Some(input_frame) = world.remove_resource::<ExternalInputs<T>>() else {
                 world.insert_resource(time_data);
                 return;
             };
-            if input_frame.frame != current_frame {
-                warn!(
-                    "External inputs target frame {}, but the session is at frame {}.",
-                    input_frame.frame, current_frame
-                );
-                world.insert_resource(time_data);
-                return;
-            }
-
-            let inputs = world
-                .remove_resource::<ExternalInputs<T>>()
-                .expect("ExternalInputs disappeared while advancing an ExternalSession");
-            let session = world.remove_resource::<Session<T>>();
-            let Some(Session::External(mut session)) = session else {
-                unreachable!();
-            };
-            let requests = session.advance_frame(&inputs.inputs);
-            world.insert_resource(Session::External(session));
-            match requests {
-                Ok(requests) => {
-                    time_data.accumulator = time_data.accumulator.saturating_sub(fps_delta);
-                    handle_requests(requests, world);
+            let staged: Vec<_> = input_frame.into_iter().collect();
+            let mut next = 0;
+            while next < staged.len() && time_data.accumulator >= fps_delta {
+                let (input_frame, inputs) = &staged[next];
+                let current_frame = match world.get_resource::<Session<T>>() {
+                    Some(Session::External(session)) => session.current_frame(),
+                    _ => unreachable!(),
+                };
+                if *input_frame != current_frame {
+                    warn!(
+                        "External inputs target frame {}, but the session is at frame {}.",
+                        input_frame, current_frame
+                    );
+                    let (frame, inputs) = staged[next].clone();
+                    let more_frames = staged[next + 1..]
+                        .iter()
+                        .map(|(_, inputs)| inputs.clone())
+                        .collect();
+                    world.insert_resource(ExternalInputs::<T>::with_more_frames(
+                        frame,
+                        inputs,
+                        more_frames,
+                    ));
+                    world.insert_resource(time_data);
+                    return;
                 }
-                Err(e) => warn!("{e}"),
+
+                let session = world.remove_resource::<Session<T>>();
+                let Some(Session::External(mut session)) = session else {
+                    unreachable!();
+                };
+                let requests = session.advance_frame(inputs);
+                world.insert_resource(Session::External(session));
+                match requests {
+                    Ok(requests) => {
+                        time_data.accumulator = time_data.accumulator.saturating_sub(fps_delta);
+                        handle_requests(requests, world);
+                        next += 1;
+                    }
+                    Err(e) => {
+                        warn!("{e}");
+                        world.insert_resource(time_data);
+                        return;
+                    }
+                }
             }
         }
         world.insert_resource(time_data);
