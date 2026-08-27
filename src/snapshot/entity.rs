@@ -6,8 +6,8 @@
 //! [`RollbackEntityMap`] so that subsequent plugins can fix up stale entity references.
 
 use crate::{
-    GgrsComponentSnapshot, GgrsComponentSnapshots, LoadWorld, LoadWorldSystems, Rollback,
-    RollbackEntityMap, RollbackFrameCount, RollbackId, SaveWorld, SaveWorldSystems,
+    GgrsComponentSnapshot, GgrsComponentSnapshots, LoadWorld, LoadWorldSystems, ResetWorld,
+    Rollback, RollbackEntityMap, RollbackFrameCount, RollbackId, SaveWorld, SaveWorldSystems,
 };
 use bevy::{ecs::entity::EntityHashMap, platform::collections::HashMap, prelude::*};
 
@@ -113,6 +113,10 @@ impl Plugin for EntitySnapshotPlugin {
                 )
                     .chain()
                     .in_set(SaveWorldSystems::Snapshot),
+            )
+            .add_systems(
+                ResetWorld,
+                GgrsComponentSnapshots::<Entity>::clear_snapshots,
             )
             .add_systems(LoadWorld, Self::load.in_set(LoadWorldSystems::Entity));
     }

@@ -11,8 +11,8 @@ use std::time::Duration;
 use bevy::prelude::*;
 
 use crate::{
-    AdvanceWorld, AdvanceWorldSystems, CloneStrategy, DEFAULT_FPS, ResourceSnapshotPlugin,
-    RollbackFrameCount,
+    AdvanceWorld, AdvanceWorldSystems, CloneStrategy, DEFAULT_FPS, ResetWorld,
+    ResourceSnapshotPlugin, RollbackFrameCount,
 };
 
 /// [`Resource`] describing the rate at which the [`AdvanceWorld`] will run.
@@ -94,6 +94,14 @@ impl GgrsTimePlugin {
         *default_time = ggrs_time.as_generic();
     }
 
+    /// Resets [`Time<GgrsTime>`] to a fresh clock with zero elapsed time and zero delta.
+    ///
+    /// Used by the [`ResetWorld`] schedule so a new session can start from frame 0
+    /// without the previous session's elapsed time leaking into it.
+    pub fn reset(mut time: ResMut<Time<GgrsTime>>) {
+        *time = Time::new_with(GgrsTime);
+    }
+
     /// Overrides the [default time](`Time<()>`) with [`Time<Virtual>`].
     pub fn replace_default_with_virtual(
         mut default_time: ResMut<Time<()>>,
@@ -118,6 +126,7 @@ impl Plugin for GgrsTimePlugin {
             .add_systems(
                 AdvanceWorld,
                 Self::replace_default_with_virtual.in_set(AdvanceWorldSystems::Last),
-            );
+            )
+            .add_systems(ResetWorld, Self::reset);
     }
 }

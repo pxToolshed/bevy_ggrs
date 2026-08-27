@@ -65,6 +65,16 @@ pub struct SaveWorld;
 #[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone)]
 pub struct AdvanceWorld;
 
+/// Label for the schedule which resets all snapshot history and GGRS runtime state
+/// back to its initial values, so a fresh session can start at frame 0.
+///
+/// The systems registered here clear stored snapshot histories and reset
+/// bookkeeping resources. They do **not** remove the [`Session`](`crate::Session`),
+/// do **not** despawn live [`Rollback`] entities, and do **not** modify
+/// [`RollbackOrdered`] or [`RollbackDespawned`] themselves.
+#[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone)]
+pub struct ResetWorld;
+
 /// Keeps track of the current frame the rollback simulation is in
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RollbackFrameCount(pub i32);
@@ -242,6 +252,28 @@ impl<For, As> GgrsSnapshots<For, As> {
         self.snapshots.get(index)
     }
 
+    /// Clears all stored snapshots and frames while keeping the configured depth
+    /// and any reserved capacity.
+    pub fn clear(&mut self) {
+        debug_assert_eq!(
+            self.snapshots.len(),
+            self.frames.len(),
+            "Snapshot and Frame queues must always be in sync"
+        );
+
+        self.snapshots.clear();
+        self.frames.clear();
+    }
+
+    /// A system which clears this snapshot storage, keeping the configured depth.
+    pub fn clear_snapshots(mut snapshots: ResMut<Self>)
+    where
+        For: Send + Sync + 'static,
+        As: Send + Sync + 'static,
+    {
+        snapshots.clear();
+    }
+
     /// A system which automatically confirms the [`ConfirmedFrameCount`], discarding older snapshots.
     pub fn discard_old_snapshots(
         mut snapshots: ResMut<Self>,
@@ -337,6 +369,7 @@ impl Plugin for SnapshotPlugin {
             .init_schedule(LoadWorld)
             .init_schedule(SaveWorld)
             .init_schedule(AdvanceWorld)
+            .init_schedule(ResetWorld)
             .add_plugins((
                 EntitySnapshotPlugin,
                 ResourceSnapshotPlugin::<CloneStrategy<RollbackOrdered>>::default(),

@@ -9,7 +9,7 @@
 //! rather than updating in place; that is left as future work.
 
 use crate::{
-    GgrsResourceSnapshots, LoadWorld, LoadWorldSystems, RollbackFrameCount, SaveWorld,
+    GgrsResourceSnapshots, LoadWorld, LoadWorldSystems, ResetWorld, RollbackFrameCount, SaveWorld,
     SaveWorldSystems, Strategy,
 };
 use bevy::ecs::component::Mutable;
@@ -116,6 +116,10 @@ where
                 )
                     .chain()
                     .in_set(SaveWorldSystems::Snapshot),
+            )
+            .add_systems(
+                ResetWorld,
+                GgrsResourceSnapshots::<S::Target, S::Stored>::clear_snapshots,
             )
             .add_systems(LoadWorld, Self::load.in_set(LoadWorldSystems::Data));
     }

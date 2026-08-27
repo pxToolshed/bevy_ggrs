@@ -5,7 +5,7 @@
 //! [`RollbackEntityMap`] after the entity graph is reconstructed.
 
 use crate::{
-    GgrsComponentSnapshots, LoadWorld, LoadWorldSystems, RollbackFrameCount, SaveWorld,
+    GgrsComponentSnapshots, LoadWorld, LoadWorldSystems, ResetWorld, RollbackFrameCount, SaveWorld,
     SaveWorldSystems,
 };
 use bevy::{ecs::hierarchy::ChildOf, prelude::*};
@@ -36,6 +36,10 @@ impl Plugin for ChildOfSnapshotPlugin {
                 )
                     .chain()
                     .in_set(SaveWorldSystems::Snapshot),
+            )
+            .add_systems(
+                ResetWorld,
+                GgrsComponentSnapshots::<ChildOf, ChildOf>::clear_snapshots,
             )
             .add_systems(LoadWorld, Self::load.in_set(LoadWorldSystems::Data));
     }

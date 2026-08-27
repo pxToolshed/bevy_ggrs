@@ -207,6 +207,38 @@ pub struct LocalPlayers(pub Vec<PlayerHandle>);
 #[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone)]
 pub struct ReadInputs;
 
+/// Resets all GGRS-managed snapshot history and runtime state back to its initial values,
+/// so that a fresh session can start from frame 0 in the same Bevy [`World`].
+///
+/// This runs the [`ResetWorld`] schedule, which is populated automatically by the
+/// [`SnapshotPlugin`](snapshot::SnapshotPlugin), by [`GgrsPlugin`], and by every
+/// snapshot plugin registered through [`RollbackApp`](snapshot::RollbackApp).
+///
+/// # Safety contract
+///
+/// Only call this after a **controlled session stop** (i.e. after you have removed or
+/// stopped polling a [`Session`]). The reset itself:
+/// - does **not** remove the [`Session`] resource;
+/// - does **not** despawn any live entities, including [`Rollback`] entities;
+/// - does **not** clear [`RollbackOrdered`] or alter [`RollbackDespawned`].
+///
+/// It clears stored snapshot histories (keeping their configured depth and reserved
+/// capacity) and resets bookkeeping resources such as [`RollbackFrameCount`],
+/// [`ConfirmedFrameCount`], `Time<GgrsTime>`, and input buffers.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// // Stop the current session deliberately ...
+/// world.remove_resource::<Session<MyConfig>>();
+///
+/// // ... then reset the managed state before starting a fresh one.
+/// bevy_ggrs::reset_ggrs_world(world);
+/// ```
+pub fn reset_ggrs_world(world: &mut World) {
+    world.run_schedule(ResetWorld);
+}
+
 /// A [`SystemSet`] label for the system that drives all GGRS schedules each Bevy frame.
 ///
 /// Use this to order your systems relative to the GGRS update loop.
@@ -282,6 +314,50 @@ impl<C: Config> Default for GgrsPlugin<C> {
     }
 }
 
+/// Resets the GGRS runtime resources specific to config `C` back to their initial values.
+///
+/// Registered in [`ResetWorld`] by [`GgrsPlugin`]. Complements the snapshot-history
+/// clears registered by the snapshot plugins. Does not touch [`Session<C>`], live
+/// entities, [`RollbackOrdered`] or [`RollbackDespawned`].
+fn reset_runtime_state<C: Config>(
+    mut commands: Commands,
+    fixed_timestep: Option<ResMut<FixedTimestepData>>,
+    frame: Option<ResMut<RollbackFrameCount>>,
+    confirmed: Option<ResMut<ConfirmedFrameCount>>,
+    max_prediction: Option<ResMut<MaxPredictionWindow>>,
+    local_players: Option<ResMut<LocalPlayers>>,
+    checksum: Option<ResMut<Checksum>>,
+    entity_map: Option<ResMut<RollbackEntityMap>>,
+) {
+    if let Some(mut data) = fixed_timestep {
+        *data = FixedTimestepData::default();
+    }
+    if let Some(mut frame) = frame {
+        *frame = RollbackFrameCount(0);
+    }
+    if let Some(mut confirmed) = confirmed {
+        *confirmed = ConfirmedFrameCount(-1);
+    }
+    if let Some(mut max_prediction) = max_prediction {
+        // Same initial value as the no-session branch of `run_ggrs_schedules`.
+        *max_prediction = MaxPredictionWindow(8);
+    }
+    if let Some(mut local_players) = local_players {
+        *local_players = LocalPlayers::default();
+    }
+    if let Some(mut checksum) = checksum {
+        *checksum = Checksum::default();
+    }
+    if let Some(mut entity_map) = entity_map {
+        *entity_map = RollbackEntityMap::default();
+    }
+
+    // Input buffers are transient per-frame data; a fresh session must not inherit them.
+    commands.remove_resource::<PlayerInputs<C>>();
+    commands.remove_resource::<LocalInputs<C>>();
+    commands.remove_resource::<ExternalInputs<C>>();
+}
+
 impl<C: Config> Plugin for GgrsPlugin<C> {
     /// Registers all GGRS resources, schedules, and the session update system.
     fn build(&self, app: &mut App) {
@@ -312,6 +388,7 @@ impl<C: Config> Plugin for GgrsPlugin<C> {
                     .in_set(RunGgrsSystems)
                     .after(InputSystems), // If we are in PreUpdate, run after input is read
             )
+            .add_systems(ResetWorld, reset_runtime_state::<C>)
             .add_plugins((ChecksumPlugin, EntityChecksumPlugin, GgrsTimePlugin));
     }
 }
