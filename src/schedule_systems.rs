@@ -6,9 +6,9 @@
 //! (save, load, advance) to the corresponding bevy_ggrs schedules.
 
 use crate::{
-    AdvanceWorld, Checksum, ConfirmedFrameCount, ExternalInputs, FixedTimestepData, LoadWorld,
-    LocalInputs, LocalPlayers, MaxPredictionWindow, PlayerInputs, ReadInputs, RollbackFrameCount,
-    RollbackFrameRate, SaveWorld, Session, SyncTestMismatch,
+    AdvanceWorld, Checksum, ConfirmedFrameCount, ExternalFrameBudget, ExternalInputs,
+    FixedTimestepData, LoadWorld, LocalInputs, LocalPlayers, MaxPredictionWindow, PlayerInputs,
+    ReadInputs, RollbackFrameCount, RollbackFrameRate, SaveWorld, Session, SyncTestMismatch,
 };
 use bevy::prelude::*;
 use core::time::Duration;
@@ -56,57 +56,89 @@ pub(crate) fn run_ggrs_schedules<T: Config>(world: &mut World) {
         Some(Session::External(_))
     ) {
         world.insert_resource(LocalPlayers::default());
-        if time_data.accumulator >= fps_delta {
-            let Some(input_frame) = world.remove_resource::<ExternalInputs<T>>() else {
-                world.insert_resource(time_data);
-                return;
+
+        // The one-shot budget is consumed at entry, even when no work is possible.
+        // Mere presence selects budget mode (including 0) and bypasses the realtime
+        // accumulator entirely, so the delta accumulated by the current Update must
+        // not survive this runner call on any path.
+        let budget_limit = world
+            .remove_resource::<ExternalFrameBudget>()
+            .map(|ExternalFrameBudget(count)| count);
+        let budget_mode = budget_limit.is_some();
+        let limit = if let Some(count) = budget_limit {
+            time_data.accumulator = Duration::ZERO;
+            count as usize
+        } else {
+            // Normal mode: only whole accumulated frames may execute; the fractional
+            // residue is preserved for later updates.
+            (time_data.accumulator.as_nanos() / fps_delta.as_nanos()) as usize
+        };
+        if limit == 0 {
+            world.insert_resource(time_data);
+            return;
+        }
+
+        let Some(input_frame) = world.remove_resource::<ExternalInputs<T>>() else {
+            // No staged inputs: intentionally cap the accumulator at one frame so
+            // missing inputs cannot pre-pay multi-second execution authority.
+            if !budget_mode {
+                time_data.accumulator = time_data.accumulator.min(fps_delta);
+            }
+            world.insert_resource(time_data);
+            return;
+        };
+        let staged: Vec<_> = input_frame.into_iter().collect();
+        let mut next = 0;
+        while next < staged.len() && next < limit {
+            let (input_frame, inputs) = &staged[next];
+            let current_frame = match world.get_resource::<Session<T>>() {
+                Some(Session::External(session)) => session.current_frame(),
+                _ => unreachable!(),
             };
-            let staged: Vec<_> = input_frame.into_iter().collect();
-            let mut next = 0;
-            while next < staged.len() && time_data.accumulator >= fps_delta {
-                let (input_frame, inputs) = &staged[next];
-                let current_frame = match world.get_resource::<Session<T>>() {
-                    Some(Session::External(session)) => session.current_frame(),
-                    _ => unreachable!(),
-                };
-                if *input_frame != current_frame {
-                    warn!(
-                        "External inputs target frame {}, but the session is at frame {}.",
-                        input_frame, current_frame
-                    );
-                    let (frame, inputs) = staged[next].clone();
-                    let more_frames = staged[next + 1..]
-                        .iter()
-                        .map(|(_, inputs)| inputs.clone())
-                        .collect();
-                    world.insert_resource(ExternalInputs::<T>::with_more_frames(
-                        frame,
-                        inputs,
-                        more_frames,
-                    ));
+            if *input_frame != current_frame {
+                warn!(
+                    "External inputs target frame {}, but the session is at frame {}.",
+                    input_frame, current_frame
+                );
+                break;
+            }
+
+            let session = world.remove_resource::<Session<T>>();
+            let Some(Session::External(mut session)) = session else {
+                unreachable!();
+            };
+            let requests = session.advance_frame(inputs);
+            world.insert_resource(Session::External(session));
+            match requests {
+                Ok(requests) => {
+                    if !budget_mode {
+                        time_data.accumulator = time_data.accumulator.saturating_sub(fps_delta);
+                    }
+                    handle_requests(requests, world);
+                    next += 1;
+                }
+                Err(e) => {
+                    warn!("{e}");
+                    // Drop policy: the failing frame and all remaining staged frames
+                    // are discarded; there is no retry.
                     world.insert_resource(time_data);
                     return;
                 }
-
-                let session = world.remove_resource::<Session<T>>();
-                let Some(Session::External(mut session)) = session else {
-                    unreachable!();
-                };
-                let requests = session.advance_frame(inputs);
-                world.insert_resource(Session::External(session));
-                match requests {
-                    Ok(requests) => {
-                        time_data.accumulator = time_data.accumulator.saturating_sub(fps_delta);
-                        handle_requests(requests, world);
-                        next += 1;
-                    }
-                    Err(e) => {
-                        warn!("{e}");
-                        world.insert_resource(time_data);
-                        return;
-                    }
-                }
             }
+        }
+        if next < staged.len() {
+            // Limit or mismatch stop: retain the unconsumed tail, first frame number
+            // and input order intact.
+            let (frame, inputs) = staged[next].clone();
+            let more_frames = staged[next + 1..]
+                .iter()
+                .map(|(_, inputs)| inputs.clone())
+                .collect();
+            world.insert_resource(ExternalInputs::<T>::with_more_frames(
+                frame,
+                inputs,
+                more_frames,
+            ));
         }
         world.insert_resource(time_data);
         return;

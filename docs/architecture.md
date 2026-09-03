@@ -45,6 +45,15 @@ PreUpdate
       └─ AdvanceWorldSystems::Last    (post-frame cleanup, e.g. restore Time<()>)
 ```
 
+## External Sessions
+
+`Session::External` uses its own branch of `run_ggrs_schedules` with one execution loop and two gating modes:
+
+- **Normal mode** (default): executes at most the number of whole frames accumulated in the fixed-timestep accumulator, charging one `fps_delta` per executed frame and preserving fractional residue. If no `ExternalInputs` are staged, the accumulator is intentionally capped at one `fps_delta` so missing inputs cannot pre-pay multi-second execution authority.
+- **Budget mode**: while an `ExternalFrameBudget` resource is present (any value, including 0), the runner consumes it at entry (it is one-shot), zeroes the accumulator for the whole call, and executes up to `N` staged input frames regardless of delta time. A budget of 0 therefore executes zero frames, retains all staged inputs, and leaves no accumulated time behind; only the absence of the resource selects normal mode. The budget counts submitted forward input frames only; rollback replay frames re-executed inside a single submission are not charged.
+
+After every non-error stop (budget exhausted, accumulator exhausted, frame-number mismatch), all unconsumed staged `ExternalInputs` are reinserted losslessly, preserving the first frame number and input order. If `advance_frame` fails, the failing frame and the whole remainder are dropped; there is no retry policy.
+
 ## Snapshot Storage
 
 Each snapshotted type gets its own `GgrsSnapshots<For, As>` resource — a double-ended queue of `(frame, snapshot)` pairs stored newest-first.

@@ -33,9 +33,9 @@ pub(crate) mod time;
 /// Convenient re-exports of the most commonly used types. Glob-import this to get started.
 pub mod prelude {
     pub use crate::{
-        ExternalInputs, GgrsConfig, GgrsPlugin, GgrsSchedule, GgrsTime, PlayerInputs, ReadInputs,
-        Rollback, RollbackApp, RollbackFrameRate, RollbackId, Session, SyncTestMismatch,
-        snapshot::prelude::*,
+        ExternalFrameBudget, ExternalInputs, GgrsConfig, GgrsPlugin, GgrsSchedule, GgrsTime,
+        PlayerInputs, ReadInputs, Rollback, RollbackApp, RollbackFrameRate, RollbackId, Session,
+        SyncTestMismatch, snapshot::prelude::*,
     };
     pub use ggrs::{GgrsEvent, PlayerType, SessionBuilder};
 }
@@ -143,6 +143,35 @@ impl<T: Config> ExternalInputs<T> {
         )
     }
 }
+
+/// A one-shot frame execution budget for an [`Session::External`] runner call.
+///
+/// While this resource is present, the next [`External`](Session::External) runner call
+/// skips the realtime fixed-timestep accumulator entirely and executes up to `N` staged
+/// forward input frames (see [`ExternalInputs`]). A budget of `0` is a valid explicit
+/// budget: it executes zero frames, retains all staged inputs, leaves no accumulated
+/// time behind, and is consumed like any other value. Only the *absence* of this
+/// resource selects the normal accumulator-gated execution mode.
+///
+/// The budget is removed as soon as the runner consumes it, so it applies to exactly
+/// one runner call. It counts submitted forward input frames only; rollback replay
+/// frames that GGRS re-executes internally as part of a single [`ExternalInputs`]
+/// submission are not charged against it.
+///
+/// Insert this resource, run one Bevy update, and the staged inputs advance without
+/// waiting for accumulated delta time:
+///
+/// ```rust,ignore
+/// world.insert_resource(ExternalInputs::<GgrsConfig>::with_more_frames(
+///     0,
+///     vec![Some(input)],
+///     more_frames,
+/// ));
+/// world.insert_resource(ExternalFrameBudget(10));
+/// // next `run_ggrs_schedules` call advances up to 10 frames regardless of delta time
+/// ```
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExternalFrameBudget(pub u32);
 
 /// A resource holding the inputs for all players in the current GGRS frame.
 ///
@@ -353,9 +382,11 @@ fn reset_runtime_state<C: Config>(
     }
 
     // Input buffers are transient per-frame data; a fresh session must not inherit them.
+    // A pending one-shot budget belongs to the old session in the same way.
     commands.remove_resource::<PlayerInputs<C>>();
     commands.remove_resource::<LocalInputs<C>>();
     commands.remove_resource::<ExternalInputs<C>>();
+    commands.remove_resource::<ExternalFrameBudget>();
 }
 
 impl<C: Config> Plugin for GgrsPlugin<C> {
